@@ -1,0 +1,10 @@
+{
+  "name": "Live Mock Interview Simulator",
+  "description": "An interactive, voice-enabled mock technical interview simulator featuring 'Alex', an AI technical recruiter.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
