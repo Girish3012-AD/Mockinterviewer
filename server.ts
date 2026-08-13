@@ -151,6 +151,156 @@ Provide a structured assessment containing:
     }
   });
 
+  app.post("/api/extract-claims", async (req, res) => {
+    try {
+      const { resume } = req.body;
+
+      if (!process.env.GEMINI_API_KEY) {
+        return res.status(500).json({ error: "GEMINI_API_KEY is not set." });
+      }
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: resume,
+        config: {
+          systemInstruction: `You are the Resume Intelligence Engine for an Interview Intelligence Platform. Your task is to extract atomic, independently testable claims from the provided resume text.
+
+Rules:
+A claim must be independently testable during an interview.
+Preserve the candidate's exact meaning; do not invent achievements.
+Prefer claims with a concrete action, technology, ownership, and measurable result.
+Assign an importance score (1-5) based on how critical this claim is to a technical or professional profile.`,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                claim_text: { type: Type.STRING, description: "The atomic claim" },
+                category: { type: Type.STRING, description: "e.g., project, technical, behavioral" },
+                skill_tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+                importance: { type: Type.INTEGER }
+              },
+              required: ["claim_text", "category", "skill_tags", "importance"]
+            }
+          }
+        }
+      });
+
+      if (!response.text) throw new Error("No response text");
+      res.json(JSON.parse(response.text));
+    } catch (error) {
+      console.error("Error extracting claims:", error);
+      res.status(500).json({ error: "Failed to extract claims." });
+    }
+  });
+
+  app.post("/api/analyze-job-fit", async (req, res) => {
+    try {
+      const { jobDescription, resumeClaims } = req.body;
+
+      if (!process.env.GEMINI_API_KEY) {
+        return res.status(500).json({ error: "GEMINI_API_KEY is not set." });
+      }
+
+      const prompt = `[JSON output from Resume Intelligence Engine]\n${JSON.stringify(resumeClaims)}\n\n[Raw Job Description text]\n${jobDescription}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: {
+          systemInstruction: `You are the Job Intelligence Engine. Your task is to analyze a raw Job Description (JD) and a candidate's structured resume profile.
+
+Rules:
+Extract the required skills, preferred skills, and technologies from the JD.
+Compare the candidate's profile against these requirements.
+Identify gaps and classify them as: Missing (not demonstrated), Weak (shallow evidence), Unverified (claimed but not tested), or Strong (credible evidence).
+Generate an explainable readiness score based on requirement coverage.`,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              required_skills: { type: Type.ARRAY, items: { type: Type.STRING } },
+              readiness_score_percentage: { type: Type.INTEGER },
+              skill_gaps: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    skill: { type: Type.STRING },
+                    gap_type: { type: Type.STRING, description: "Missing, Weak, Unverified, or Strong" },
+                    explanation: { type: Type.STRING }
+                  },
+                  required: ["skill", "gap_type", "explanation"]
+                }
+              }
+            },
+            required: ["required_skills", "readiness_score_percentage", "skill_gaps"]
+          }
+        }
+      });
+
+      if (!response.text) throw new Error("No response text");
+      res.json(JSON.parse(response.text));
+    } catch (error) {
+      console.error("Error analyzing job fit:", error);
+      res.status(500).json({ error: "Failed to analyze job fit." });
+    }
+  });
+
+  app.post("/api/evaluate-answer", async (req, res) => {
+    try {
+      const { claim, question, answer } = req.body;
+
+      if (!process.env.GEMINI_API_KEY) {
+        return res.status(500).json({ error: "GEMINI_API_KEY is not set." });
+      }
+
+      const prompt = `Claim Tested: "${claim}"\nQuestion: "${question}"\nCandidate Answer: "${answer}"`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: {
+          systemInstruction: `You are the core Adaptive Interview Evaluator. You will receive a specific resume claim being tested, the interview question asked, and the candidate's answer transcript.
+
+Rules:
+Evaluate the answer based on Relevance, Technical Correctness, Depth, Ownership, and the STAR format.
+Determine the Claim Credibility Level: "Strongly supported", "Partially supported", "Weakly supported", or "Unsupported".
+Provide an explainable rationale for the evidence status.
+Suggest the next question strategy (e.g., clarify weak answer, test missing skill, or probe claim deeper).`,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              evaluation_scores: {
+                type: Type.OBJECT,
+                properties: {
+                  technical_correctness: { type: Type.INTEGER, description: "Score 1-5" },
+                  ownership: { type: Type.INTEGER, description: "Score 1-5" }
+                },
+                required: ["technical_correctness", "ownership"]
+              },
+              claim_credibility: { 
+                type: Type.STRING, 
+                description: "Strongly supported, Partially supported, Weakly supported, or Unsupported" 
+              },
+              evidence_rationale: { type: Type.STRING, description: "Why this credibility level was chosen" },
+              next_question_strategy: { type: Type.STRING, description: "What type of question to ask next" }
+            },
+            required: ["evaluation_scores", "claim_credibility", "evidence_rationale", "next_question_strategy"]
+          }
+        }
+      });
+
+      if (!response.text) throw new Error("No response text");
+      res.json(JSON.parse(response.text));
+    } catch (error) {
+      console.error("Error evaluating answer:", error);
+      res.status(500).json({ error: "Failed to evaluate answer." });
+    }
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

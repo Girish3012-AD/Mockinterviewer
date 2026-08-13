@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { Mic, MicOff, Send, Volume2, VolumeX, User, Bot, Play, Square, FileText, ClipboardList, CheckCircle } from 'lucide-react';
-import { Message, InterviewPlan } from './types';
+import { Mic, MicOff, Send, Volume2, VolumeX, User, Bot, Play, Square, FileText, ClipboardList, CheckCircle, Target, Activity, Zap } from 'lucide-react';
+import { Message, InterviewPlan, ResumeClaim, JobFitAnalysis, AnswerEvaluation } from './types';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 
@@ -18,6 +18,10 @@ export default function App() {
   const [resume, setResume] = useState('');
   const [interviewPlan, setInterviewPlan] = useState<InterviewPlan | null>(null);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [resumeClaims, setResumeClaims] = useState<ResumeClaim[] | null>(null);
+  const [isExtractingClaims, setIsExtractingClaims] = useState(false);
+  const [jobFitAnalysis, setJobFitAnalysis] = useState<JobFitAnalysis | null>(null);
+  const [isAnalyzingJobFit, setIsAnalyzingJobFit] = useState(false);
   const [trialsRemaining, setTrialsRemaining] = useState<number>(() => {
     const stored = localStorage.getItem('interview_trials');
     return stored !== null ? parseInt(stored, 10) : 3;
@@ -30,6 +34,11 @@ export default function App() {
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
+  
+  // Evaluator State
+  const [selectedClaimIndex, setSelectedClaimIndex] = useState<number>(0);
+  const [latestEvaluation, setLatestEvaluation] = useState<AnswerEvaluation | null>(null);
+  const [isEvaluatingAnswer, setIsEvaluatingAnswer] = useState(false);
   
   // Feedback State
   const [feedback, setFeedback] = useState('');
@@ -95,6 +104,46 @@ export default function App() {
     } else {
       recognitionRef.current?.start();
       setIsDictating(true);
+    }
+  };
+
+  const extractClaims = async () => {
+    if (!resume.trim()) return;
+    setIsExtractingClaims(true);
+    try {
+      const res = await fetch('/api/extract-claims', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resume })
+      });
+      if (!res.ok) throw new Error("Failed to extract claims");
+      const data = await res.json();
+      setResumeClaims(data);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to extract claims.");
+    } finally {
+      setIsExtractingClaims(false);
+    }
+  };
+
+  const analyzeJobFit = async () => {
+    if (!jobDescription.trim() || !resumeClaims) return;
+    setIsAnalyzingJobFit(true);
+    try {
+      const res = await fetch('/api/analyze-job-fit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobDescription, resumeClaims })
+      });
+      if (!res.ok) throw new Error("Failed to analyze job fit");
+      const data = await res.json();
+      setJobFitAnalysis(data);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to analyze job fit.");
+    } finally {
+      setIsAnalyzingJobFit(false);
     }
   };
 
@@ -187,6 +236,45 @@ export default function App() {
     }
   };
 
+  const handleEvaluateAnswer = async () => {
+    const userMsgs = messages.filter(m => m.role === 'user');
+    if (userMsgs.length === 0) return;
+    const lastUserMsg = userMsgs[userMsgs.length - 1];
+    
+    const lastUserIdx = messages.lastIndexOf(lastUserMsg);
+    let lastModelMsg = null;
+    for (let i = lastUserIdx - 1; i >= 0; i--) {
+       if (messages[i].role === 'model') {
+           lastModelMsg = messages[i];
+           break;
+       }
+    }
+    
+    if (!lastModelMsg || !resumeClaims || resumeClaims.length === 0) return;
+    const claim = resumeClaims[selectedClaimIndex].claim_text;
+
+    setIsEvaluatingAnswer(true);
+    try {
+      const res = await fetch('/api/evaluate-answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+           claim,
+           question: lastModelMsg.text,
+           answer: lastUserMsg.text
+        })
+      });
+      if (!res.ok) throw new Error("Failed to evaluate answer");
+      const data = await res.json();
+      setLatestEvaluation(data);
+    } catch(e) {
+       console.error(e);
+       alert("Failed to evaluate answer against claim.");
+    } finally {
+       setIsEvaluatingAnswer(false);
+    }
+  };
+
   const endInterviewAndEvaluate = async () => {
     stopAudio();
     setIsEvaluating(true);
@@ -224,8 +312,36 @@ export default function App() {
             <p className="text-slate-400">Provide the context to generate a tailored interview plan.</p>
             <button 
               onClick={() => {
-                setJobDescription("Looking for a Backend Engineer with 2+ years of experience in Python, FastAPI, PostgreSQL, and AWS (Cloud Run / Lambda). Must have experience building RESTful APIs and optimizing database queries.");
-                setResume("Software Developer with experience in Python, Flask, and MySQL. Built a web-based complaint system using Flask and MySQL. Knowledge of DSA, Java, and basic cloud deployment.");
+                setJobDescription(`Position: Senior AI/ML Backend Engineer
+Company: InnovateTech
+Role Requirements:
+- 5+ years building and scaling RESTful APIs and microservices in Python (FastAPI, Flask) and Node.js.
+- Strong expertise in distributed systems, AWS (EKS, Lambda, S3, RDS), and CI/CD pipelines (GitHub Actions).
+- Proven experience deploying and fine-tuning Large Language Models (LLMs) in production environments.
+- Excellent system design skills and experience optimizing PostgreSQL for high-volume read/write workloads.
+- Strong communication skills, with a track record of mentoring junior engineers and leading cross-functional projects.
+- Must have experience with Vector Databases (Pinecone, Weaviate) and Retrieval-Augmented Generation (RAG) architectures.`);
+                
+                setResume(`ALICE ENGINEER
+Senior Backend Developer | AI Specialist
+alice.engineer@email.com | github.com/alice-eng
+
+PROFESSIONAL EXPERIENCE
+
+Senior Backend Engineer, DataCorp (2020 - Present)
+- Designed and developed a scalable REST API using Node.js and Express, supporting 50,000+ daily active users.
+- Migrated legacy monolithic architecture to AWS microservices (Lambda, ECS), reducing infrastructure costs by 35% and improving uptime to 99.99%.
+- Spearheaded the integration of OpenAI APIs and Pinecone vector database to build an enterprise RAG-based search tool, decreasing customer support ticket volume by 20%.
+- Optimized legacy PostgreSQL queries by introducing proper indexing and materialized views, reducing average latency from 800ms to 45ms.
+- Mentored a team of 3 junior developers and established code review guidelines.
+
+Software Developer, WebSolutions (2017 - 2020)
+- Built internal dashboard applications using Python Flask and React.
+- Managed MySQL databases, writing complex joins and stored procedures for reporting.
+- Deployed applications on DigitalOcean and managed basic CI/CD with Jenkins.
+
+EDUCATION
+B.S. in Computer Science, State University (2017)`);
               }}
               className="mt-4 text-sm bg-slate-800 hover:bg-slate-700 text-slate-300 py-1.5 px-4 rounded-full transition-colors border border-slate-700"
             >
@@ -255,8 +371,138 @@ export default function App() {
                 placeholder="Paste the candidate's resume here..."
                 className="w-full h-64 bg-slate-900 border border-slate-800 rounded-xl p-4 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-colors"
               />
+              <button
+                onClick={extractClaims}
+                disabled={!resume.trim() || isExtractingClaims}
+                className="w-full bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white font-medium py-2 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm border border-slate-700"
+              >
+                {isExtractingClaims ? (
+                   <>
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Extracting...
+                  </>
+                ) : (
+                  <>
+                    <Target className="w-4 h-4" />
+                    Extract Claims
+                  </>
+                )}
+              </button>
             </div>
           </div>
+          
+          {resumeClaims && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4"
+            >
+              <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                <Target className="w-5 h-5 text-purple-500" />
+                Atomic Resume Claims
+              </h2>
+              <div className="grid gap-3">
+                {resumeClaims.map((claim, idx) => (
+                  <div key={idx} className="bg-slate-950/50 rounded-xl p-4 border border-slate-800/50 flex gap-4 items-start">
+                     <div className="flex-1 space-y-2">
+                        <p className="text-slate-200 text-sm">{claim.claim_text}</p>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="text-xs bg-slate-800 text-slate-400 px-2 py-1 rounded-md border border-slate-700 uppercase">
+                            {claim.category}
+                          </span>
+                          {claim.skill_tags.map(tag => (
+                            <span key={tag} className="text-xs bg-blue-900/30 text-blue-400 px-2 py-1 rounded-md border border-blue-800/50">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                     </div>
+                     <div className="shrink-0 flex flex-col items-center justify-center bg-slate-900 w-12 h-12 rounded-full border border-slate-700">
+                        <span className="text-lg font-bold text-white">{claim.importance}</span>
+                        <span className="text-[10px] text-slate-500 uppercase font-semibold">/ 5</span>
+                     </div>
+                  </div>
+                ))}
+              </div>
+
+              {!jobFitAnalysis && (
+                <div className="pt-6 border-t border-slate-800 mt-2">
+                  <button
+                    onClick={analyzeJobFit}
+                    disabled={isAnalyzingJobFit || !jobDescription.trim()}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/20 border border-indigo-500/50"
+                  >
+                    {isAnalyzingJobFit ? (
+                      <>
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Analyzing Job Fit...
+                      </>
+                    ) : (
+                      <>
+                        <ClipboardList className="w-5 h-5" />
+                        Analyze Job Fit
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {jobFitAnalysis && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6"
+            >
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                  <ClipboardList className="w-5 h-5 text-indigo-500" />
+                  Job Fit Analysis
+                </h2>
+                <div className="flex flex-col items-center justify-center bg-indigo-900/40 border border-indigo-700/50 rounded-xl px-4 py-2">
+                   <span className="text-2xl font-bold text-indigo-400">{jobFitAnalysis.readiness_score_percentage}%</span>
+                   <span className="text-[10px] text-indigo-300 uppercase font-semibold">Readiness Score</span>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Required Skills</h3>
+                <div className="flex flex-wrap gap-2">
+                  {jobFitAnalysis.required_skills.map((skill, idx) => (
+                    <span key={idx} className="text-xs bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700">
+                      {skill}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Skill Gaps</h3>
+                <div className="grid gap-3">
+                  {jobFitAnalysis.skill_gaps.map((gap, idx) => {
+                    let colorClass = "text-slate-400 bg-slate-800 border-slate-700";
+                    if (gap.gap_type === 'Missing') colorClass = "text-red-400 bg-red-950/30 border-red-900/50";
+                    if (gap.gap_type === 'Weak') colorClass = "text-orange-400 bg-orange-950/30 border-orange-900/50";
+                    if (gap.gap_type === 'Unverified') colorClass = "text-yellow-400 bg-yellow-950/30 border-yellow-900/50";
+                    if (gap.gap_type === 'Strong') colorClass = "text-emerald-400 bg-emerald-950/30 border-emerald-900/50";
+                    
+                    return (
+                      <div key={idx} className="bg-slate-950/50 rounded-xl p-4 border border-slate-800/50 flex flex-col md:flex-row gap-4 items-start md:items-center">
+                         <div className="flex-1">
+                            <p className="text-slate-200 font-medium mb-1">{gap.skill}</p>
+                            <p className="text-slate-400 text-sm">{gap.explanation}</p>
+                         </div>
+                         <span className={`shrink-0 text-xs px-3 py-1 rounded-full border ${colorClass} font-semibold uppercase tracking-wide`}>
+                           {gap.gap_type}
+                         </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </motion.div>
+          )}
 
           {!interviewPlan ? (
             <div className="flex justify-center pt-4">
@@ -430,49 +676,162 @@ export default function App() {
         </div>
       </header>
 
-      {/* Chat Area */}
-      <main className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
-        <AnimatePresence initial={false}>
-          {messages.map((msg, idx) => (
-            <motion.div
-              key={idx}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
-            >
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1 ${
-                msg.role === 'user' ? 'bg-slate-800' : 'bg-blue-600/20 border border-blue-500/30'
-              }`}>
-                {msg.role === 'user' ? <User className="w-4 h-4 text-slate-300" /> : <Bot className="w-4 h-4 text-blue-500" />}
+      {/* Chat Area & Adaptive Evaluator */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Chat Area */}
+        <main className={`flex-1 overflow-y-auto p-4 md:p-6 space-y-6 ${resumeClaims && resumeClaims.length > 0 ? 'border-r border-slate-800' : ''}`}>
+          <AnimatePresence initial={false}>
+            {messages.map((msg, idx) => (
+              <motion.div
+                key={idx}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
+              >
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1 ${
+                  msg.role === 'user' ? 'bg-slate-800' : 'bg-blue-600/20 border border-blue-500/30'
+                }`}>
+                  {msg.role === 'user' ? <User className="w-4 h-4 text-slate-300" /> : <Bot className="w-4 h-4 text-blue-500" />}
+                </div>
+                <div className={`max-w-[85%] md:max-w-[75%] rounded-2xl px-5 py-3 shadow-sm ${
+                  msg.role === 'user' 
+                    ? 'bg-blue-600 text-white rounded-tr-sm' 
+                    : 'bg-slate-800 text-slate-100 rounded-tl-sm border border-slate-700'
+                }`}>
+                  <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                </div>
+              </motion.div>
+            ))}
+            {isLoading && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex gap-4"
+              >
+                 <div className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shrink-0 mt-1">
+                  <Bot className="w-4 h-4 text-blue-500" />
+                </div>
+                <div className="bg-slate-800 border border-slate-700 rounded-2xl rounded-tl-sm px-5 py-4 flex gap-1 items-center shadow-sm">
+                  <span className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <div ref={messagesEndRef} />
+        </main>
+
+        {/* Adaptive Evaluator Panel (Right Side) */}
+        {resumeClaims && resumeClaims.length > 0 && (
+          <aside className="w-96 shrink-0 bg-slate-900/50 flex flex-col overflow-y-auto hidden lg:flex">
+            <div className="p-4 border-b border-slate-800 bg-slate-900 sticky top-0 z-10">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Activity className="w-5 h-5 text-indigo-400" />
+                Adaptive Evaluator
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">Test candidate's answer against a specific claim.</p>
+            </div>
+            
+            <div className="p-4 space-y-6">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-300">Target Resume Claim:</label>
+                <select 
+                  className="w-full bg-slate-800 border border-slate-700 text-sm text-slate-200 rounded-lg p-2 focus:ring-1 focus:ring-indigo-500 outline-none"
+                  value={selectedClaimIndex}
+                  onChange={(e) => setSelectedClaimIndex(Number(e.target.value))}
+                >
+                  {resumeClaims.map((claim, idx) => (
+                    <option key={idx} value={idx}>
+                      [{claim.category}] {claim.claim_text.substring(0, 50)}...
+                    </option>
+                  ))}
+                </select>
+                <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-3 text-xs text-slate-300 italic">
+                  "{resumeClaims[selectedClaimIndex].claim_text}"
+                </div>
               </div>
-              <div className={`max-w-[85%] md:max-w-[75%] rounded-2xl px-5 py-3 shadow-sm ${
-                msg.role === 'user' 
-                  ? 'bg-blue-600 text-white rounded-tr-sm' 
-                  : 'bg-slate-800 text-slate-100 rounded-tl-sm border border-slate-700'
-              }`}>
-                <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
-              </div>
-            </motion.div>
-          ))}
-          {isLoading && (
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="flex gap-4"
-            >
-               <div className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shrink-0 mt-1">
-                <Bot className="w-4 h-4 text-blue-500" />
-              </div>
-              <div className="bg-slate-800 border border-slate-700 rounded-2xl rounded-tl-sm px-5 py-4 flex gap-1 items-center shadow-sm">
-                <span className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        <div ref={messagesEndRef} />
-      </main>
+
+              <button
+                onClick={handleEvaluateAnswer}
+                disabled={isEvaluatingAnswer || messages.filter(m => m.role === 'user').length === 0}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-medium py-2 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm border border-indigo-500/50 shadow-sm"
+              >
+                {isEvaluatingAnswer ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Evaluating...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4" />
+                    Evaluate Last Answer
+                  </>
+                )}
+              </button>
+
+              {latestEvaluation && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-4"
+                >
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 shadow-sm">
+                    <div className="flex justify-between items-center mb-3 border-b border-slate-800 pb-2">
+                       <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Credibility</span>
+                       <span className={`text-xs font-bold px-2 py-1 rounded border ${
+                         latestEvaluation.claim_credibility === 'Strongly supported' ? 'bg-emerald-900/30 text-emerald-400 border-emerald-800' :
+                         latestEvaluation.claim_credibility === 'Partially supported' ? 'bg-blue-900/30 text-blue-400 border-blue-800' :
+                         latestEvaluation.claim_credibility === 'Weakly supported' ? 'bg-yellow-900/30 text-yellow-400 border-yellow-800' :
+                         'bg-red-900/30 text-red-400 border-red-800'
+                       }`}>
+                         {latestEvaluation.claim_credibility}
+                       </span>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-slate-400">Technical Correctness</span>
+                          <span className="text-slate-300 font-medium">{latestEvaluation.evaluation_scores.technical_correctness}/5</span>
+                        </div>
+                        <div className="w-full bg-slate-800 rounded-full h-1.5">
+                          <div className="bg-indigo-500 h-1.5 rounded-full" style={{ width: `${(latestEvaluation.evaluation_scores.technical_correctness / 5) * 100}%` }}></div>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-slate-400">Ownership</span>
+                          <span className="text-slate-300 font-medium">{latestEvaluation.evaluation_scores.ownership}/5</span>
+                        </div>
+                        <div className="w-full bg-slate-800 rounded-full h-1.5">
+                          <div className="bg-purple-500 h-1.5 rounded-full" style={{ width: `${(latestEvaluation.evaluation_scores.ownership / 5) * 100}%` }}></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 shadow-sm space-y-2">
+                    <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Rationale</h4>
+                    <p className="text-sm text-slate-300 leading-relaxed">
+                      {latestEvaluation.evidence_rationale}
+                    </p>
+                  </div>
+
+                  <div className="bg-indigo-950/30 border border-indigo-900/50 rounded-xl p-4 shadow-sm space-y-2">
+                    <h4 className="text-xs font-semibold text-indigo-400 uppercase tracking-wide flex items-center gap-1">
+                      <Bot className="w-3 h-3" /> Next Strategy
+                    </h4>
+                    <p className="text-sm text-indigo-200 leading-relaxed">
+                      {latestEvaluation.next_question_strategy}
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          </aside>
+        )}
+      </div>
 
       {/* Input Area */}
       <footer className="bg-slate-900 border-t border-slate-800 p-4 shrink-0 shadow-lg z-10">
