@@ -1,0 +1,26 @@
+fastapi
+uvicorn[standard]
+websockets
+python-dotenv
+pydantic
+pydantic-settings
+
+# Database
+sqlalchemy[asyncio]
+aiomysql
+alembic
+
+# AI
+google-generativeai
+
+# Docker (for sandbox)
+docker
+
+# gRPC (for sandbox)
+grpcio
+# grpcio-tools
+
+# Utilities
+uuid
+python-multipart
+httpx

@@ -1,0 +1,112 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  background: var(--color-surface-0);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-soft);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--color-text-main);
+  margin: 0;
+}
+
+.gaugeContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: conic-gradient(var(--color-primary) var(--score-deg), var(--color-surface-1) 0deg);
+  position: relative;
+}
+
+.gaugeInner {
+  position: absolute;
+  inset: 6px;
+  background: var(--color-surface-0);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--color-text-main);
+}
+
+.badges {
+  display: flex;
+  gap: 1rem;
+}
+
+.badge {
+  padding: 0.5rem 1rem;
+  background: var(--color-surface-1);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--color-text-main);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sectionTitle {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--color-text-main);
+  margin: 0;
+}
+
+.issueList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.issueItem {
+  padding: 0.75rem;
+  background: var(--color-surface-1);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+.feedback {
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+}
+
+.loading {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: 2rem;
+  font-size: var(--fs-sm);
+}
+
+.empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: 2rem;
+  font-size: var(--fs-sm);
+  font-style: italic;
+}

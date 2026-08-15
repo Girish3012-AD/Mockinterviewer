@@ -1,0 +1,78 @@
+.bubble {
+  display: flex;
+  gap: 0.75rem;
+  animation: fade-in 200ms ease;
+  max-width: 85%;
+}
+
+.bubble--user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.bubble--assistant {
+  align-self: flex-start;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.bubble--user .avatar {
+  background: var(--color-accent-dim);
+  color: var(--color-accent-text);
+}
+
+.bubble--assistant .avatar {
+  background: var(--color-surface-3);
+  color: var(--color-text-secondary);
+}
+
+.messageBox {
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-lg);
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  max-width: 100%;
+  word-break: break-word;
+}
+
+.bubble--user .messageBox {
+  background: var(--color-accent);
+  color: hsl(220, 20%, 8%);
+  border-bottom-right-radius: var(--radius-sm);
+}
+
+.bubble--assistant .messageBox {
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-soft);
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+/* Typing indicator */
+.typingIndicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.875rem 1.25rem;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  background: var(--color-text-muted);
+  border-radius: 50%;
+  animation: typing-dot 1.2s ease infinite;
+}
+
+.dot:nth-child(2) { animation-delay: 0.2s; }
+.dot:nth-child(3) { animation-delay: 0.4s; }

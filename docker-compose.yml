@@ -1,0 +1,39 @@
+# =============================================================================
+# InterviewOS — Local Development Infrastructure
+# =============================================================================
+# Usage:
+#   docker compose up -d        # Start MySQL
+#   docker compose down          # Stop MySQL
+#   docker compose down -v       # Stop and destroy volume (reset data)
+# =============================================================================
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: interviewos-mysql
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-interviewos}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max-connections=100
+
+volumes:
+  mysql_data:
+    driver: local
