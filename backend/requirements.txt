@@ -16,11 +16,7 @@ google-generativeai
 # Docker (for sandbox)
 docker
 
-# gRPC (for sandbox)
-grpcio
-# grpcio-tools
-
 # Utilities
-uuid
+
 python-multipart
 httpx
