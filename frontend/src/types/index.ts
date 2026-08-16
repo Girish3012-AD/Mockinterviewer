@@ -23,6 +23,8 @@ export interface ResumeClaim {
   category: string;
   skill_tags: string[];
   importance: number;
+  interview_risk: 'High' | 'Medium' | 'Low';
+  risk_rationale: string;
 }
 
 export interface SkillGap {
@@ -89,6 +91,7 @@ export interface SessionListItem {
   status: string;
   created_at: string;
   readiness_score: number | null;
+  recovery_score?: number | null;
 }
 
 export interface SessionDetail {
@@ -99,6 +102,7 @@ export interface SessionDetail {
   created_at: string;
   updated_at: string;
   readiness_score: number | null;
+  recovery_score?: number | null;
   questions: InterviewQuestion[];
   evaluation: EvaluationResponse | null;
 }

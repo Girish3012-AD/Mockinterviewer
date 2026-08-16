@@ -38,6 +38,7 @@ class InterviewSession(Base):
     job_desc: Mapped[str] = mapped_column(Text, nullable=False)
     resume: Mapped[str] = mapped_column(Text, nullable=False)
     readiness_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    recovery_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
@@ -167,6 +168,8 @@ class ResumeClaim(Base):
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     skill_tags: Mapped[Any | None] = mapped_column(JSON, nullable=True)
     importance: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    interview_risk: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    risk_rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     session: Mapped["InterviewSession"] = relationship(back_populates="resume_claims")
 

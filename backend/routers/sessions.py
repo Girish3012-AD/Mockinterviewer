@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from event_consumer import drain_and_persist
-from models import ChatEvent, Evaluation, InterviewQuestion, InterviewSession
+from models import Evaluation, InterviewQuestion, InterviewSession
 from schemas import (
     EvaluationResponse,
     InterviewQuestion as IQSchema,
@@ -18,6 +18,7 @@ from schemas import (
     StarBreakdown,
 )
 from services.gemini import evaluate_interview
+from services.recovery_engine import recovery_engine
 
 router = APIRouter(prefix="/api", tags=["sessions"])
 
@@ -36,6 +37,7 @@ async def list_sessions(
             status=s.status,
             created_at=s.created_at.isoformat(),
             readiness_score=s.readiness_score,
+            recovery_score=s.recovery_score,
         )
         for s in sessions
     ]
@@ -84,6 +86,7 @@ async def get_session(
         created_at=session.created_at.isoformat(),
         updated_at=session.updated_at.isoformat(),
         readiness_score=session.readiness_score,
+        recovery_score=session.recovery_score,
         questions=[
             IQSchema(id=q.sequence, question=q.question, type=q.type, focus_area=q.focus_area)
             for q in questions
@@ -113,6 +116,20 @@ async def end_session(
 
     # Drain events → MySQL
     events = await drain_and_persist(session_id, db)
+
+    # Persist cumulative recovery score from in-memory Recovery Engine
+    final_recovery = recovery_engine.get_cumulative_score(session_id)
+    if final_recovery is None:
+        # Fallback: average recovery_score values from drained event metadata
+        scored = [
+            e.metadata.get("recovery_score")
+            for e in events
+            if e.metadata and isinstance(e.metadata.get("recovery_score"), int)
+        ]
+        if scored:
+            final_recovery = round(sum(scored) / len(scored))
+    session.recovery_score = final_recovery
+    recovery_engine.clear(session_id)
 
     # Build transcript for evaluation
     transcript_lines = [

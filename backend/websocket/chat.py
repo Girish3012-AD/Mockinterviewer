@@ -6,6 +6,7 @@ Protocol:
   Server → Client: JSON { "type": "chat"|"error"|"interview_complete", "content": "...", "metadata": {} }
 
 Zero MySQL writes during the interview. All events buffered in EventStore.
+Pushback Protocol + Recovery Engine run in-memory between turns.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from event_store import event_store
 from models import InterviewQuestion, InterviewSession
 from services.gemini import chat_with_alex
+from services.recovery_engine import recovery_engine
 
 logger = logging.getLogger(__name__)
 
@@ -87,47 +89,89 @@ async def interview_ws_handler(
             content = msg.get("content", "").strip()
 
             if msg_type == "end_interview":
+                score = recovery_engine.get_cumulative_score(session_id)
                 await websocket.send_json({
                     "type": "interview_complete",
                     "content": "Interview ended. Generating your scorecard...",
+                    "metadata": {"recovery_score": score},
                 })
                 break
 
             if not content:
                 continue
 
-            # Store user event
-            await event_store.append(session_id, "user", content, "chat")
-
-            # Build chat history from EventStore
+            # Build chat history BEFORE appending the new user turn
+            # (recovery engine needs prior assistant question as context)
             history_events = await event_store.get_history(session_id)
-            # Exclude the last user event (we'll pass it as `message`)
+            history = [
+                {"role": e.role if e.role != "assistant" else "model", "content": e.content}
+                for e in history_events
+                if e.event_type == "chat"
+            ]
+
+            # Adaptive Decision Engine + Recovery Engine (in-memory only)
+            adaptive = await recovery_engine.process_turn(
+                session_id, history, content, interview_plan
+            )
+
+            # Store user event with quality/recovery metadata
+            await event_store.append(
+                session_id,
+                "user",
+                content,
+                "chat",
+                metadata=adaptive.user_metadata or None,
+            )
+
+            # Rebuild history for Alex (exclude the just-appended user turn)
+            history_events = await event_store.get_history(session_id)
             history = [
                 {"role": e.role if e.role != "assistant" else "model", "content": e.content}
                 for e in history_events[:-1]
                 if e.event_type == "chat"
             ]
 
-            # Call Alex
+            # Call Alex — inject pushback instruction when protocol is active
             try:
-                alex_reply = await chat_with_alex(history, content, interview_plan)
+                alex_reply = await chat_with_alex(
+                    history,
+                    content,
+                    interview_plan,
+                    pushback_instruction=adaptive.pushback_instruction,
+                )
             except Exception as exc:
                 logger.error("Gemini error: %s", exc)
                 alex_reply = "I'm having trouble responding right now. Please continue."
 
-            # Store assistant event
-            await event_store.append(session_id, "assistant", alex_reply, "chat")
+            # Store assistant event with recovery metadata
+            await event_store.append(
+                session_id,
+                "assistant",
+                alex_reply,
+                "chat",
+                metadata=adaptive.assistant_metadata or None,
+            )
 
             # Check if Alex signaled completion
             if "[INTERVIEW COMPLETE]" in alex_reply:
-                await websocket.send_json({"type": "chat", "content": alex_reply})
+                score = recovery_engine.get_cumulative_score(session_id)
+                await websocket.send_json({
+                    "type": "chat",
+                    "content": alex_reply,
+                    "metadata": adaptive.assistant_metadata or None,
+                })
                 await websocket.send_json({
                     "type": "interview_complete",
                     "content": "The interview is complete. Generating your scorecard...",
+                    "metadata": {"recovery_score": score},
                 })
                 break
 
-            await websocket.send_json({"type": "chat", "content": alex_reply})
+            await websocket.send_json({
+                "type": "chat",
+                "content": alex_reply,
+                "metadata": adaptive.assistant_metadata or None,
+            })
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected for session %s", session_id)

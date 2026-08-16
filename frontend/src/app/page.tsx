@@ -5,18 +5,19 @@ import { useRouter } from 'next/navigation';
 import styles from './page.module.css';
 import { useToast } from '@/components/Toast';
 import { InterviewPlan } from '@/components/InterviewPlan';
+import { VulnerabilityMap } from '@/components/VulnerabilityMap';
 import { createSession, extractClaims, analyzeJobFit, generateQuestions } from '@/services/api';
 import type { ResumeClaim, JobFitAnalysis, InterviewQuestion } from '@/types';
 
 export default function SetupPage() {
   const router = useRouter();
   const { showToast } = useToast();
-  
+
   const [jobDescription, setJobDescription] = useState('');
   const [resume, setResume] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [step, setStep] = useState<'input' | 'results'>('input');
-  
+
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [claims, setClaims] = useState<ResumeClaim[]>([]);
   const [jobFit, setJobFit] = useState<JobFitAnalysis | null>(null);
@@ -30,20 +31,16 @@ export default function SetupPage() {
 
     setIsLoading(true);
     try {
-      // 1. Create session
       const session = await createSession(jobDescription, resume);
       const sid = session.session_id;
       setSessionId(sid);
 
-      // 2. Extract claims
       const claimsRes = await extractClaims(sid, resume);
       setClaims(claimsRes.claims);
 
-      // 3. Analyze fit
       const fitRes = await analyzeJobFit(sid, jobDescription, claimsRes.claims);
       setJobFit(fitRes);
 
-      // 4. Generate plan
       const planRes = await generateQuestions(sid, jobDescription, resume);
       setQuestions(planRes.interview_plan);
 
@@ -90,8 +87,8 @@ export default function SetupPage() {
               onChange={(e) => setResume(e.target.value)}
             />
           </div>
-          <button 
-            className={styles.button} 
+          <button
+            className={styles.button}
             onClick={handleAnalyze}
             disabled={isLoading}
           >
@@ -102,16 +99,7 @@ export default function SetupPage() {
 
       {step === 'results' && (
         <div className={styles.results}>
-          {claims.length > 0 && (
-            <div className={styles.section}>
-              <h3 className={styles.sectionTitle}>Key Claims Extracted</h3>
-              <ul className={styles.claimsList}>
-                {claims.map((claim, idx) => (
-                  <li key={idx} className={styles.claimBadge}>{claim.claim_text}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <VulnerabilityMap claims={claims} />
 
           {jobFit && (
             <div className={styles.section}>
@@ -132,10 +120,10 @@ export default function SetupPage() {
             </div>
           )}
 
-          <InterviewPlan 
-            questions={questions} 
-            onStart={handleStartInterview} 
-            isLoading={false} 
+          <InterviewPlan
+            questions={questions}
+            onStart={handleStartInterview}
+            isLoading={false}
           />
         </div>
       )}

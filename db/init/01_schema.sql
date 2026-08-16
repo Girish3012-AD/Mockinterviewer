@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS interview_sessions (
     job_desc      TEXT         NOT NULL,
     resume        TEXT         NOT NULL,
     readiness_score INT        DEFAULT NULL,
+    recovery_score  INT        DEFAULT NULL,   -- 0-100; adaptability under pushback
     created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
@@ -97,6 +98,8 @@ CREATE TABLE IF NOT EXISTS resume_claims (
     category      VARCHAR(100) DEFAULT NULL,
     skill_tags    JSON         DEFAULT NULL,
     importance    INT          DEFAULT NULL,      -- 1-5
+    interview_risk VARCHAR(10) DEFAULT NULL,      -- High | Medium | Low
+    risk_rationale TEXT        DEFAULT NULL,      -- why interviewer will push back
     PRIMARY KEY (id),
     FOREIGN KEY (session_id) REFERENCES interview_sessions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -55,6 +55,8 @@ class ResumeClaim(BaseModel):
     category: str
     skill_tags: list[str]
     importance: int = Field(..., ge=1, le=5)
+    interview_risk: Literal["High", "Medium", "Low"] = "Medium"
+    risk_rationale: str = ""
 
 
 class ExtractClaimsResponse(BaseModel):
@@ -103,6 +105,38 @@ class EvaluateAnswerResponse(BaseModel):
     claim_credibility: Literal["High", "Medium", "Low", "Fabricated"]
     evidence_rationale: str
     next_question_strategy: str
+
+
+# ---------------------------------------------------------------------------
+# Adaptive Decision Engine — Pushback & Recovery
+# ---------------------------------------------------------------------------
+class AnswerQualityAssessment(BaseModel):
+    quality: Literal["strong", "partial", "weak", "incorrect"]
+    is_technical: bool
+    topic: str
+    rationale: str
+
+
+class PushbackDecision(BaseModel):
+    should_pushback: bool
+    challenge_text: str = ""
+    target_topic: str = ""
+
+
+class RecoveryEvaluation(BaseModel):
+    recognized_mistake: bool
+    corrected_answer: bool
+    recovery_score: int = Field(..., ge=0, le=100)
+    rationale: str
+
+
+class AdaptiveTurnResult(BaseModel):
+    pushback_instruction: str | None = None
+    pushback_active: bool = False
+    recovery_score_delta: int = 0
+    cumulative_recovery_score: int = 0
+    user_metadata: dict[str, Any] = Field(default_factory=dict)
+    assistant_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +190,7 @@ class SessionListItem(BaseModel):
     status: str
     created_at: str
     readiness_score: int | None
+    recovery_score: int | None = None
 
 
 class SessionDetail(BaseModel):
@@ -166,6 +201,7 @@ class SessionDetail(BaseModel):
     created_at: str
     updated_at: str
     readiness_score: int | None
+    recovery_score: int | None = None
     questions: list[InterviewQuestion]
     evaluation: dict[str, Any] | None = None
 

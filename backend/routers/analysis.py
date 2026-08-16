@@ -37,7 +37,7 @@ async def api_extract_claims(
 
     claims_raw = await extract_claims(body.resume)
 
-    # Persist claims
+    # Persist claims (including Interview Risk from Vulnerability Map)
     for c in claims_raw:
         db.add(
             ResumeClaim(
@@ -46,6 +46,8 @@ async def api_extract_claims(
                 category=c.get("category"),
                 skill_tags=c.get("skill_tags"),
                 importance=c.get("importance"),
+                interview_risk=c.get("interview_risk"),
+                risk_rationale=c.get("risk_rationale"),
             )
         )
     await db.commit()
@@ -60,6 +62,8 @@ async def api_extract_claims(
                 category=c.get("category", ""),
                 skill_tags=c.get("skill_tags", []),
                 importance=c.get("importance", 3),
+                interview_risk=c.get("interview_risk", "Medium"),
+                risk_rationale=c.get("risk_rationale", ""),
             )
             for c in claims_raw
         ],

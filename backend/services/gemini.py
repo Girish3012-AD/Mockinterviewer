@@ -41,6 +41,7 @@ async def chat_with_alex(
     history: list[dict[str, str]],
     message: str,
     interview_plan: list[dict[str, Any]] | None = None,
+    pushback_instruction: str | None = None,
 ) -> str:
     """Send a chat message to Alex. Returns the assistant's text reply."""
     system = ALEX_SYSTEM
@@ -50,6 +51,9 @@ async def chat_with_alex(
             for i, q in enumerate(interview_plan)
         )
         system += f"\n\nINTERVIEW PLAN (follow this order):\n{plan_text}"
+
+    if pushback_instruction:
+        system += f"\n\nPUSHBACK PROTOCOL (mandatory — follow exactly):\n{pushback_instruction}"
 
     model = genai.GenerativeModel(model_name=MODEL, system_instruction=system)
 
@@ -96,10 +100,25 @@ Rules:
 
 
 async def extract_claims(resume: str) -> list[dict[str, Any]]:
-    """Extract atomic, testable claims from a resume. Returns list of claim dicts."""
+    """Extract atomic claims with Interview Risk scores. Validated via Pydantic."""
+    from schemas import ResumeClaim
+
     system = """Extract atomic, testable claims from the resume. Each claim must be:
 - A single, verifiable statement of skill, achievement, or experience.
 - Specific enough to be challenged in an interview.
+
+For EVERY claim, assign an Interview Risk score based on:
+1. Importance — how central the claim is to the candidate's story (importance 1-5).
+2. Technical depth — vague buzzwords without concrete mechanisms are riskier.
+3. Lack of metrics — claims like "improved database speed" with no numbers, baselines,
+   or before/after evidence are High Risk traps interviewers will probe.
+
+Risk levels:
+- High: Vague, unquantified, or overstated claims likely to collapse under scrutiny.
+- Medium: Plausible but thin; needs follow-up for depth or metrics.
+- Low: Specific, measurable, and technically grounded — hard to challenge unfairly.
+
+risk_rationale must explain EXACTLY why an interviewer would push back (1-2 sentences).
 
 Return ONLY valid JSON array:
 [
@@ -107,7 +126,9 @@ Return ONLY valid JSON array:
     "claim_text": "...",
     "category": "Technical Skills | Work Experience | Leadership | Project | Education",
     "skill_tags": ["tag1", "tag2"],
-    "importance": 1-5
+    "importance": 1-5,
+    "interview_risk": "High | Medium | Low",
+    "risk_rationale": "..."
   }
 ]"""
 
@@ -117,7 +138,138 @@ Return ONLY valid JSON array:
         generation_config=genai.GenerationConfig(response_mime_type="application/json"),
     )
     response = await model.generate_content_async(resume)
-    return json.loads(response.text)
+    raw = json.loads(response.text)
+    if not isinstance(raw, list):
+        raise ValueError("extract_claims expected a JSON array")
+
+    validated: list[dict[str, Any]] = []
+    for item in raw:
+        claim = ResumeClaim.model_validate(item)
+        validated.append(claim.model_dump())
+    return validated
+
+
+async def assess_answer_quality(
+    question: str,
+    answer: str,
+    interview_plan: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Assess whether an answer is strong/partial/weak/incorrect. Pydantic-validated."""
+    from schemas import AnswerQualityAssessment
+
+    system = """You are a senior technical interviewer scoring one candidate answer.
+
+Return ONLY valid JSON:
+{
+  "quality": "strong | partial | weak | incorrect",
+  "is_technical": true/false,
+  "topic": "short topic label (e.g. time complexity, system design tradeoff)",
+  "rationale": "1-2 sentences explaining the quality rating"
+}
+
+Definitions:
+- strong: Correct, specific, and defensible.
+- partial: Directionally right but missing depth, edge cases, or metrics.
+- weak: Vague, hand-wavy, or unsupported by evidence.
+- incorrect: Factually wrong (wrong complexity, wrong algorithm, false claim).
+
+Mark is_technical=true for algorithms, complexity, systems, code, or engineering tradeoffs."""
+
+    plan_ctx = ""
+    if interview_plan:
+        plan_ctx = "\nInterview plan context:\n" + json.dumps(interview_plan, indent=2)
+
+    model = genai.GenerativeModel(
+        model_name=MODEL,
+        system_instruction=system,
+        generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+    )
+    prompt = f"Latest interviewer question (from history):\n{question}\n\nCandidate answer:\n{answer}{plan_ctx}"
+    response = await model.generate_content_async(prompt)
+    return AnswerQualityAssessment.model_validate(json.loads(response.text)).model_dump()
+
+
+async def generate_pushback(
+    question: str,
+    answer: str,
+    quality_assessment: dict[str, Any],
+) -> dict[str, Any]:
+    """Generate a targeted challenge for a weak/incorrect answer. Pydantic-validated."""
+    from schemas import PushbackDecision
+
+    system = """You enforce the Pushback Protocol for a mock technical interview.
+
+If the answer is weak or incorrect (especially technical mistakes like wrong Big-O,
+wrong data structure, or shallow system design), set should_pushback=true and write
+a sharp but fair challenge. Do NOT fail the candidate or advance to the next question.
+
+Examples of good challenge_text:
+- "Are you sure that array traversal is O(N)? Look closely at your nested loop."
+- "You said the cache improved latency — by how much, and how did you measure it?"
+- "Walk me through what happens if that map key is missing."
+
+If the answer is already strong, set should_pushback=false and leave challenge_text empty.
+
+Return ONLY valid JSON:
+{
+  "should_pushback": true/false,
+  "challenge_text": "...",
+  "target_topic": "..."
+}"""
+
+    model = genai.GenerativeModel(
+        model_name=MODEL,
+        system_instruction=system,
+        generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+    )
+    prompt = (
+        f"Question context:\n{question}\n\n"
+        f"Candidate answer:\n{answer}\n\n"
+        f"Quality assessment:\n{json.dumps(quality_assessment, indent=2)}"
+    )
+    response = await model.generate_content_async(prompt)
+    return PushbackDecision.model_validate(json.loads(response.text)).model_dump()
+
+
+async def evaluate_recovery(
+    original_answer: str,
+    pushback_challenge: str,
+    recovery_answer: str,
+    topic: str,
+) -> dict[str, Any]:
+    """Score whether the candidate recognized and corrected a mistake. Pydantic-validated."""
+    from schemas import RecoveryEvaluation
+
+    system = """Evaluate the candidate's recovery after interviewer pushback.
+
+Award a high recovery_score (75-100) if they:
+- Explicitly recognize the mistake or gap, AND
+- Provide a corrected, more accurate answer.
+
+Award a medium score (40-74) if they partially correct but still miss key points.
+Award a low score (0-39) if they double down, ignore the hint, or stay vague.
+
+Return ONLY valid JSON:
+{
+  "recognized_mistake": true/false,
+  "corrected_answer": true/false,
+  "recovery_score": 0-100,
+  "rationale": "1-2 sentences"
+}"""
+
+    model = genai.GenerativeModel(
+        model_name=MODEL,
+        system_instruction=system,
+        generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+    )
+    prompt = (
+        f"Topic: {topic}\n\n"
+        f"Original (flawed) answer:\n{original_answer}\n\n"
+        f"Interviewer challenge:\n{pushback_challenge}\n\n"
+        f"Candidate's follow-up answer:\n{recovery_answer}"
+    )
+    response = await model.generate_content_async(prompt)
+    return RecoveryEvaluation.model_validate(json.loads(response.text)).model_dump()
 
 
 async def analyze_job_fit(
