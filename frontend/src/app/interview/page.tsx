@@ -79,7 +79,7 @@ function InterviewContent() {
         // Session may already be active
       }
       setStartTime(new Date());
-      connect(`ws://localhost:8000/ws/interview/${sessionId}`);
+      connect(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/interview/${sessionId}`);
     };
 
     init();

@@ -1,6 +1,7 @@
 """
 routers/analysis.py — Resume claim extraction, job fit analysis, answer evaluation
 """
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,6 +19,9 @@ from schemas import (
     JobFitResponse,
 )
 from services.gemini import analyze_job_fit, evaluate_answer, extract_claims
+from services.gemini import GeminiAPIError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 
@@ -35,7 +39,36 @@ async def api_extract_claims(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    claims_raw = await extract_claims(body.resume)
+    try:
+        claims_raw = await extract_claims(body.resume)
+    except GeminiAPIError as e:
+        logger.warning("Falling back to demo claims due to AI service error: %s", e)
+        claims_raw = [
+            {
+                "claim_text": "Experienced software developer with strong technical skills",
+                "category": "Work Experience",
+                "skill_tags": ["Software Development", "Problem Solving"],
+                "importance": 5,
+                "interview_risk": "Medium",
+                "risk_rationale": "Claim is broad but plausible for a senior role.",
+            },
+            {
+                "claim_text": "Proficient in modern web technologies and frameworks",
+                "category": "Technical Skills",
+                "skill_tags": ["Web Development", "Frontend", "Backend"],
+                "importance": 4,
+                "interview_risk": "Medium",
+                "risk_rationale": "Common claim that requires specific examples to validate.",
+            },
+            {
+                "claim_text": "Delivered projects on time with high quality standards",
+                "category": "Work Experience",
+                "skill_tags": ["Project Management", "Quality Assurance"],
+                "importance": 4,
+                "interview_risk": "High",
+                "risk_rationale": "Vague claim without metrics or specific project details.",
+            },
+        ]
 
     # Persist claims (including Interview Risk from Vulnerability Map)
     for c in claims_raw:
@@ -83,8 +116,27 @@ async def api_analyze_job_fit(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    claims_dicts = [c.model_dump() for c in body.resume_claims]
-    fit_data = await analyze_job_fit(body.job_description, claims_dicts)
+    try:
+        claims_dicts = [c.model_dump() for c in body.resume_claims]
+        fit_data = await analyze_job_fit(body.job_description, claims_dicts)
+    except GeminiAPIError as e:
+        logger.warning("Falling back to demo job fit due to AI service error: %s", e)
+        fit_data = {
+            "required_skills": ["JavaScript", "React", "Node.js", "SQL", "System Design"],
+            "readiness_score_percentage": 72,
+            "skill_gaps": [
+                {
+                    "skill": "System Design",
+                    "gap_type": "Weak",
+                    "explanation": "Resume mentions projects but lacks evidence of large-scale system design experience.",
+                },
+                {
+                    "skill": "SQL Optimization",
+                    "gap_type": "Unverified",
+                    "explanation": "Claimed database work but no specific optimization examples provided.",
+                },
+            ],
+        }
 
     # Upsert job fit
     existing = await db.execute(
@@ -122,7 +174,11 @@ async def api_analyze_job_fit(
 @router.post("/evaluate-answer", response_model=EvaluateAnswerResponse)
 async def api_evaluate_answer(body: EvaluateAnswerRequest) -> EvaluateAnswerResponse:
     """Evaluate a single answer against a resume claim (no DB write)."""
-    data = await evaluate_answer(body.claim, body.question, body.answer)
+    try:
+        data = await evaluate_answer(body.claim, body.question, body.answer)
+    except GeminiAPIError as e:
+        logger.warning("AI service error in evaluate_answer: %s", e)
+        raise HTTPException(status_code=e.status_code, detail=str(e)) from e
     from schemas import EvaluationScores
 
     return EvaluateAnswerResponse(

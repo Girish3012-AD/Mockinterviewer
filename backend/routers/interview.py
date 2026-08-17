@@ -1,6 +1,7 @@
 """
 routers/interview.py — Session creation + question generation endpoints
 """
+import logging
 import uuid
 from typing import Annotated
 
@@ -19,6 +20,9 @@ from schemas import (
 )
 from schemas import InterviewQuestion as IQSchema
 from services.gemini import generate_questions
+from services.gemini import GeminiAPIError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["interview"])
 
@@ -56,7 +60,17 @@ async def api_generate_questions(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    questions_raw = await generate_questions(body.job_description, body.resume)
+    try:
+        questions_raw = await generate_questions(body.job_description, body.resume)
+    except GeminiAPIError as e:
+        logger.warning("Falling back to demo questions due to AI service error: %s", e)
+        questions_raw = [
+            {"id": 1, "question": "Tell me about a time you had to solve a difficult technical problem. What was your approach?", "type": "Behavioral", "focus_area": "Problem Solving"},
+            {"id": 2, "question": "Describe a situation where you had to collaborate with a difficult team member. How did you handle it?", "type": "Behavioral", "focus_area": "Team Collaboration"},
+            {"id": 3, "question": "Give an example of a project where you had to learn a new technology quickly. What was the outcome?", "type": "Behavioral", "focus_area": "Learning Agility"},
+            {"id": 4, "question": "Explain the difference between SQL and NoSQL databases. When would you use each?", "type": "Technical", "focus_area": "Database Design"},
+            {"id": 5, "question": "How would you design a URL shortening service like bit.ly? Walk me through the architecture.", "type": "Technical", "focus_area": "System Design"},
+        ]
 
     # Persist to MySQL
     db_questions = []

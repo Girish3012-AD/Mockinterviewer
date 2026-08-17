@@ -9,6 +9,7 @@ import json
 import logging
 from typing import Any
 
+import google.api_core.exceptions
 import google.generativeai as genai
 from google.generativeai import types as gtypes
 
@@ -20,6 +21,13 @@ logger = logging.getLogger(__name__)
 genai.configure(api_key=settings.gemini_api_key)
 
 MODEL = "gemini-2.5-flash"
+
+
+class GeminiAPIError(Exception):
+    """Raised when the Gemini API returns an error (quota, rate limit, etc.)."""
+    def __init__(self, message: str, status_code: int = 503):
+        super().__init__(message)
+        self.status_code = status_code
 
 # ---------------------------------------------------------------------------
 # Alex persona system instruction (text-only, no voice references)
@@ -57,14 +65,20 @@ async def chat_with_alex(
 
     model = genai.GenerativeModel(model_name=MODEL, system_instruction=system)
 
-    # Convert history list to Gemini conversation history
     gemini_history = [
         {"role": turn["role"], "parts": [turn["content"]]}
         for turn in history
     ]
     chat = model.start_chat(history=gemini_history)
-    response = await chat.send_message_async(message)
-    return response.text
+    try:
+        response = await chat.send_message_async(message)
+        return response.text
+    except google.api_core.exceptions.ResourceExhausted as e:
+        logger.error("Gemini quota exhausted in chat_with_alex: %s", e)
+        raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
+    except google.api_core.exceptions.GoogleAPIError as e:
+        logger.error("Gemini API error in chat_with_alex: %s", e)
+        raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
 
 async def generate_questions(job_description: str, resume: str) -> list[dict[str, Any]]:
@@ -94,9 +108,16 @@ Rules:
     )
 
     prompt = f"Job Description:\n{job_description}\n\nResume:\n{resume}"
-    response = await model.generate_content_async(prompt)
-    data = json.loads(response.text)
-    return data["interview_plan"]
+    try:
+        response = await model.generate_content_async(prompt)
+        data = json.loads(response.text)
+        return data["interview_plan"]
+    except google.api_core.exceptions.ResourceExhausted as e:
+        logger.error("Gemini quota exhausted in generate_questions: %s", e)
+        raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
+    except google.api_core.exceptions.GoogleAPIError as e:
+        logger.error("Gemini API error in generate_questions: %s", e)
+        raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
 
 async def extract_claims(resume: str) -> list[dict[str, Any]]:
@@ -137,16 +158,23 @@ Return ONLY valid JSON array:
         system_instruction=system,
         generation_config=genai.GenerationConfig(response_mime_type="application/json"),
     )
-    response = await model.generate_content_async(resume)
-    raw = json.loads(response.text)
-    if not isinstance(raw, list):
-        raise ValueError("extract_claims expected a JSON array")
+    try:
+        response = await model.generate_content_async(resume)
+        raw = json.loads(response.text)
+        if not isinstance(raw, list):
+            raise ValueError("extract_claims expected a JSON array")
 
-    validated: list[dict[str, Any]] = []
-    for item in raw:
-        claim = ResumeClaim.model_validate(item)
-        validated.append(claim.model_dump())
-    return validated
+        validated: list[dict[str, Any]] = []
+        for item in raw:
+            claim = ResumeClaim.model_validate(item)
+            validated.append(claim.model_dump())
+        return validated
+    except google.api_core.exceptions.ResourceExhausted as e:
+        logger.error("Gemini quota exhausted in extract_claims: %s", e)
+        raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
+    except google.api_core.exceptions.GoogleAPIError as e:
+        logger.error("Gemini API error in extract_claims: %s", e)
+        raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
 
 async def assess_answer_quality(
@@ -185,8 +213,15 @@ Mark is_technical=true for algorithms, complexity, systems, code, or engineering
         generation_config=genai.GenerationConfig(response_mime_type="application/json"),
     )
     prompt = f"Latest interviewer question (from history):\n{question}\n\nCandidate answer:\n{answer}{plan_ctx}"
-    response = await model.generate_content_async(prompt)
-    return AnswerQualityAssessment.model_validate(json.loads(response.text)).model_dump()
+    try:
+        response = await model.generate_content_async(prompt)
+        return AnswerQualityAssessment.model_validate(json.loads(response.text)).model_dump()
+    except google.api_core.exceptions.ResourceExhausted as e:
+        logger.error("Gemini quota exhausted in assess_answer_quality: %s", e)
+        raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
+    except google.api_core.exceptions.GoogleAPIError as e:
+        logger.error("Gemini API error in assess_answer_quality: %s", e)
+        raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
 
 async def generate_pushback(
@@ -227,8 +262,15 @@ Return ONLY valid JSON:
         f"Candidate answer:\n{answer}\n\n"
         f"Quality assessment:\n{json.dumps(quality_assessment, indent=2)}"
     )
-    response = await model.generate_content_async(prompt)
-    return PushbackDecision.model_validate(json.loads(response.text)).model_dump()
+    try:
+        response = await model.generate_content_async(prompt)
+        return PushbackDecision.model_validate(json.loads(response.text)).model_dump()
+    except google.api_core.exceptions.ResourceExhausted as e:
+        logger.error("Gemini quota exhausted in generate_pushback: %s", e)
+        raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
+    except google.api_core.exceptions.GoogleAPIError as e:
+        logger.error("Gemini API error in generate_pushback: %s", e)
+        raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
 
 async def evaluate_recovery(
@@ -268,8 +310,15 @@ Return ONLY valid JSON:
         f"Interviewer challenge:\n{pushback_challenge}\n\n"
         f"Candidate's follow-up answer:\n{recovery_answer}"
     )
-    response = await model.generate_content_async(prompt)
-    return RecoveryEvaluation.model_validate(json.loads(response.text)).model_dump()
+    try:
+        response = await model.generate_content_async(prompt)
+        return RecoveryEvaluation.model_validate(json.loads(response.text)).model_dump()
+    except google.api_core.exceptions.ResourceExhausted as e:
+        logger.error("Gemini quota exhausted in evaluate_recovery: %s", e)
+        raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
+    except google.api_core.exceptions.GoogleAPIError as e:
+        logger.error("Gemini API error in evaluate_recovery: %s", e)
+        raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
 
 async def analyze_job_fit(
@@ -303,8 +352,15 @@ gap_type definitions:
         generation_config=genai.GenerationConfig(response_mime_type="application/json"),
     )
     prompt = f"Job Description:\n{job_description}\n\nResume Claims:\n{json.dumps(resume_claims, indent=2)}"
-    response = await model.generate_content_async(prompt)
-    return json.loads(response.text)
+    try:
+        response = await model.generate_content_async(prompt)
+        return json.loads(response.text)
+    except google.api_core.exceptions.ResourceExhausted as e:
+        logger.error("Gemini quota exhausted in analyze_job_fit: %s", e)
+        raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
+    except google.api_core.exceptions.GoogleAPIError as e:
+        logger.error("Gemini API error in analyze_job_fit: %s", e)
+        raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
 
 async def evaluate_answer(claim: str, question: str, answer: str) -> dict[str, Any]:
@@ -328,8 +384,15 @@ Return ONLY valid JSON:
         generation_config=genai.GenerationConfig(response_mime_type="application/json"),
     )
     prompt = f"Resume Claim: {claim}\nQuestion Asked: {question}\nCandidate Answer: {answer}"
-    response = await model.generate_content_async(prompt)
-    return json.loads(response.text)
+    try:
+        response = await model.generate_content_async(prompt)
+        return json.loads(response.text)
+    except google.api_core.exceptions.ResourceExhausted as e:
+        logger.error("Gemini quota exhausted in evaluate_answer: %s", e)
+        raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
+    except google.api_core.exceptions.GoogleAPIError as e:
+        logger.error("Gemini API error in evaluate_answer: %s", e)
+        raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
 
 async def evaluate_interview(transcript: str, session_id: str) -> dict[str, Any]:
@@ -358,6 +421,13 @@ Return ONLY valid JSON:
         generation_config=genai.GenerationConfig(response_mime_type="application/json"),
     )
     response = await model.generate_content_async(f"Full Interview Transcript:\n\n{transcript}")
-    data = json.loads(response.text)
-    data["session_id"] = session_id
-    return data
+    try:
+        data = json.loads(response.text)
+        data["session_id"] = session_id
+        return data
+    except google.api_core.exceptions.ResourceExhausted as e:
+        logger.error("Gemini quota exhausted in evaluate_interview: %s", e)
+        raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
+    except google.api_core.exceptions.GoogleAPIError as e:
+        logger.error("Gemini API error in evaluate_interview: %s", e)
+        raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
