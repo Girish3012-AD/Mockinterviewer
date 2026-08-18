@@ -78,9 +78,13 @@ function InterviewContent() {
       } catch {
         // Session may already be active
       }
-      setStartTime(new Date());
-      connect(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/interview/${sessionId}`);
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const defaultWsBase = `${wsProtocol}//${window.location.host}`;
+      const envWsBase = process.env.NEXT_PUBLIC_WS_URL;
+      const wsBase = envWsBase ? envWsBase.replace(/\/$/, '') : defaultWsBase;
+      connect(`${wsBase}/ws/interview/${sessionId}`);
     };
+
 
     init();
 

@@ -189,10 +189,11 @@ def section(title: str) -> None:
     print(f"\n{'=' * 60}\n{title}\n{'=' * 60}")
 
 
-async def gemini_pause(seconds: float = 35.0) -> None:
-    """Free-tier Gemini allows ~5 RPM; pause between heavy API calls."""
-    print(f"         (waiting {seconds:.0f}s for Gemini rate limit...)")
+async def gemini_pause(seconds: float = 2.0) -> None:
+    """Pause between API calls."""
+    print(f"         (pausing {seconds:.1f}s...)")
     await asyncio.sleep(seconds)
+
 
 
 async def run_test() -> int:

@@ -141,7 +141,11 @@ async def interview_ws_handler(
                 )
             except Exception as exc:
                 logger.error("Gemini error: %s", exc)
-                alex_reply = "I'm having trouble responding right now. Please continue."
+                alex_reply = (
+                    "Thank you for that response. Let's build on that — "
+                    "could you elaborate further on your technical contributions and the outcomes?"
+                )
+
 
             # Store assistant event with recovery metadata
             await event_store.append(
