@@ -27,8 +27,13 @@ class Settings(BaseSettings):
     # Frontend URLs (used for CORS)
     next_public_api_url: str = "http://localhost:3000"
 
+    # Database mode
+    use_sqlite: bool = True
+
     @property
     def async_db_url(self) -> str:
+        if self.use_sqlite:
+            return "sqlite+aiosqlite:///./interviewos.db"
         return (
             f"mysql+aiomysql://root:{self.mysql_root_password}"
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"

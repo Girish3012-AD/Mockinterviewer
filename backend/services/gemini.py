@@ -52,38 +52,46 @@ async def chat_with_alex(
     pushback_instruction: str | None = None,
 ) -> str:
     """Send a chat message to Alex. Returns the assistant's text reply."""
-    system = ALEX_SYSTEM
-    if interview_plan:
-        plan_text = "\n".join(
-            f"{i+1}. [{q['type']}] {q['question']} (focus: {q['focus_area']})"
-            for i, q in enumerate(interview_plan)
-        )
-        system += f"\n\nINTERVIEW PLAN (follow this order):\n{plan_text}"
-
-    if pushback_instruction:
-        system += f"\n\nPUSHBACK PROTOCOL (mandatory — follow exactly):\n{pushback_instruction}"
-
-    model = genai.GenerativeModel(model_name=MODEL, system_instruction=system)
-
-    gemini_history = [
-        {"role": turn["role"], "parts": [turn["content"]]}
-        for turn in history
-    ]
-    chat = model.start_chat(history=gemini_history)
     try:
+        if not settings.gemini_api_key:
+            raise GeminiAPIError("Gemini API key not configured.", status_code=503)
+
+        system = ALEX_SYSTEM
+        if interview_plan:
+            plan_text = "\n".join(
+                f"{i+1}. [{q['type']}] {q['question']} (focus: {q['focus_area']})"
+                for i, q in enumerate(interview_plan)
+            )
+            system += f"\n\nINTERVIEW PLAN (follow this order):\n{plan_text}"
+
+        if pushback_instruction:
+            system += f"\n\nPUSHBACK PROTOCOL (mandatory — follow exactly):\n{pushback_instruction}"
+
+        model = genai.GenerativeModel(model_name=MODEL, system_instruction=system)
+        gemini_history = [
+            {"role": turn["role"], "parts": [turn["content"]]}
+            for turn in history
+        ]
+        chat = model.start_chat(history=gemini_history)
         response = await chat.send_message_async(message)
         return response.text
     except google.api_core.exceptions.ResourceExhausted as e:
         logger.error("Gemini quota exhausted in chat_with_alex: %s", e)
         raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
-    except google.api_core.exceptions.GoogleAPIError as e:
+    except (google.api_core.exceptions.GoogleAPIError, Exception) as e:
+        if isinstance(e, GeminiAPIError):
+            raise e
         logger.error("Gemini API error in chat_with_alex: %s", e)
         raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
 
 async def generate_questions(job_description: str, resume: str) -> list[dict[str, Any]]:
     """Generate 3 behavioral + 2 technical interview questions. Returns list of question dicts."""
-    system = """You are an expert technical interviewer. Generate exactly 5 interview questions
+    try:
+        if not settings.gemini_api_key:
+            raise GeminiAPIError("Gemini API key not configured.", status_code=503)
+
+        system = """You are an expert technical interviewer. Generate exactly 5 interview questions
 (3 Behavioral, 2 Technical) tailored to the job description and candidate resume.
 
 Return ONLY valid JSON with this exact schema:
@@ -99,32 +107,36 @@ Rules:
 - Technical questions must test skills explicitly mentioned in the JD.
 - focus_area must be ≤6 words."""
 
-    model = genai.GenerativeModel(
-        model_name=MODEL,
-        system_instruction=system,
-        generation_config=genai.GenerationConfig(
-            response_mime_type="application/json",
-        ),
-    )
+        model = genai.GenerativeModel(
+            model_name=MODEL,
+            system_instruction=system,
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+            ),
+        )
 
-    prompt = f"Job Description:\n{job_description}\n\nResume:\n{resume}"
-    try:
+        prompt = f"Job Description:\n{job_description}\n\nResume:\n{resume}"
         response = await model.generate_content_async(prompt)
         data = json.loads(response.text)
         return data["interview_plan"]
     except google.api_core.exceptions.ResourceExhausted as e:
         logger.error("Gemini quota exhausted in generate_questions: %s", e)
         raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
-    except google.api_core.exceptions.GoogleAPIError as e:
+    except (google.api_core.exceptions.GoogleAPIError, Exception) as e:
+        if isinstance(e, GeminiAPIError):
+            raise e
         logger.error("Gemini API error in generate_questions: %s", e)
         raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
-
 
 async def extract_claims(resume: str) -> list[dict[str, Any]]:
     """Extract atomic claims with Interview Risk scores. Validated via Pydantic."""
     from schemas import ResumeClaim
 
-    system = """Extract atomic, testable claims from the resume. Each claim must be:
+    try:
+        if not settings.gemini_api_key:
+            raise GeminiAPIError("Gemini API key not configured.", status_code=503)
+
+        system = """Extract atomic, testable claims from the resume. Each claim must be:
 - A single, verifiable statement of skill, achievement, or experience.
 - Specific enough to be challenged in an interview.
 
@@ -153,12 +165,11 @@ Return ONLY valid JSON array:
   }
 ]"""
 
-    model = genai.GenerativeModel(
-        model_name=MODEL,
-        system_instruction=system,
-        generation_config=genai.GenerationConfig(response_mime_type="application/json"),
-    )
-    try:
+        model = genai.GenerativeModel(
+            model_name=MODEL,
+            system_instruction=system,
+            generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+        )
         response = await model.generate_content_async(resume)
         raw = json.loads(response.text)
         if not isinstance(raw, list):
@@ -172,7 +183,9 @@ Return ONLY valid JSON array:
     except google.api_core.exceptions.ResourceExhausted as e:
         logger.error("Gemini quota exhausted in extract_claims: %s", e)
         raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
-    except google.api_core.exceptions.GoogleAPIError as e:
+    except (google.api_core.exceptions.GoogleAPIError, Exception) as e:
+        if isinstance(e, GeminiAPIError):
+            raise e
         logger.error("Gemini API error in extract_claims: %s", e)
         raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
@@ -185,7 +198,11 @@ async def assess_answer_quality(
     """Assess whether an answer is strong/partial/weak/incorrect. Pydantic-validated."""
     from schemas import AnswerQualityAssessment
 
-    system = """You are a senior technical interviewer scoring one candidate answer.
+    try:
+        if not settings.gemini_api_key:
+            raise GeminiAPIError("Gemini API key not configured.", status_code=503)
+
+        system = """You are a senior technical interviewer scoring one candidate answer.
 
 Return ONLY valid JSON:
 {
@@ -203,23 +220,24 @@ Definitions:
 
 Mark is_technical=true for algorithms, complexity, systems, code, or engineering tradeoffs."""
 
-    plan_ctx = ""
-    if interview_plan:
-        plan_ctx = "\nInterview plan context:\n" + json.dumps(interview_plan, indent=2)
+        plan_ctx = ""
+        if interview_plan:
+            plan_ctx = "\nInterview plan context:\n" + json.dumps(interview_plan, indent=2)
 
-    model = genai.GenerativeModel(
-        model_name=MODEL,
-        system_instruction=system,
-        generation_config=genai.GenerationConfig(response_mime_type="application/json"),
-    )
-    prompt = f"Latest interviewer question (from history):\n{question}\n\nCandidate answer:\n{answer}{plan_ctx}"
-    try:
+        model = genai.GenerativeModel(
+            model_name=MODEL,
+            system_instruction=system,
+            generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+        )
+        prompt = f"Latest interviewer question (from history):\n{question}\n\nCandidate answer:\n{answer}{plan_ctx}"
         response = await model.generate_content_async(prompt)
         return AnswerQualityAssessment.model_validate(json.loads(response.text)).model_dump()
     except google.api_core.exceptions.ResourceExhausted as e:
         logger.error("Gemini quota exhausted in assess_answer_quality: %s", e)
         raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
-    except google.api_core.exceptions.GoogleAPIError as e:
+    except (google.api_core.exceptions.GoogleAPIError, Exception) as e:
+        if isinstance(e, GeminiAPIError):
+            raise e
         logger.error("Gemini API error in assess_answer_quality: %s", e)
         raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
@@ -232,7 +250,11 @@ async def generate_pushback(
     """Generate a targeted challenge for a weak/incorrect answer. Pydantic-validated."""
     from schemas import PushbackDecision
 
-    system = """You enforce the Pushback Protocol for a mock technical interview.
+    try:
+        if not settings.gemini_api_key:
+            raise GeminiAPIError("Gemini API key not configured.", status_code=503)
+
+        system = """You enforce the Pushback Protocol for a mock technical interview.
 
 If the answer is weak or incorrect (especially technical mistakes like wrong Big-O,
 wrong data structure, or shallow system design), set should_pushback=true and write
@@ -252,23 +274,24 @@ Return ONLY valid JSON:
   "target_topic": "..."
 }"""
 
-    model = genai.GenerativeModel(
-        model_name=MODEL,
-        system_instruction=system,
-        generation_config=genai.GenerationConfig(response_mime_type="application/json"),
-    )
-    prompt = (
-        f"Question context:\n{question}\n\n"
-        f"Candidate answer:\n{answer}\n\n"
-        f"Quality assessment:\n{json.dumps(quality_assessment, indent=2)}"
-    )
-    try:
+        model = genai.GenerativeModel(
+            model_name=MODEL,
+            system_instruction=system,
+            generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+        )
+        prompt = (
+            f"Question context:\n{question}\n\n"
+            f"Candidate answer:\n{answer}\n\n"
+            f"Quality assessment:\n{json.dumps(quality_assessment, indent=2)}"
+        )
         response = await model.generate_content_async(prompt)
         return PushbackDecision.model_validate(json.loads(response.text)).model_dump()
     except google.api_core.exceptions.ResourceExhausted as e:
         logger.error("Gemini quota exhausted in generate_pushback: %s", e)
         raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
-    except google.api_core.exceptions.GoogleAPIError as e:
+    except (google.api_core.exceptions.GoogleAPIError, Exception) as e:
+        if isinstance(e, GeminiAPIError):
+            raise e
         logger.error("Gemini API error in generate_pushback: %s", e)
         raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
@@ -282,7 +305,11 @@ async def evaluate_recovery(
     """Score whether the candidate recognized and corrected a mistake. Pydantic-validated."""
     from schemas import RecoveryEvaluation
 
-    system = """Evaluate the candidate's recovery after interviewer pushback.
+    try:
+        if not settings.gemini_api_key:
+            raise GeminiAPIError("Gemini API key not configured.", status_code=503)
+
+        system = """Evaluate the candidate's recovery after interviewer pushback.
 
 Award a high recovery_score (75-100) if they:
 - Explicitly recognize the mistake or gap, AND
@@ -299,24 +326,25 @@ Return ONLY valid JSON:
   "rationale": "1-2 sentences"
 }"""
 
-    model = genai.GenerativeModel(
-        model_name=MODEL,
-        system_instruction=system,
-        generation_config=genai.GenerationConfig(response_mime_type="application/json"),
-    )
-    prompt = (
-        f"Topic: {topic}\n\n"
-        f"Original (flawed) answer:\n{original_answer}\n\n"
-        f"Interviewer challenge:\n{pushback_challenge}\n\n"
-        f"Candidate's follow-up answer:\n{recovery_answer}"
-    )
-    try:
+        model = genai.GenerativeModel(
+            model_name=MODEL,
+            system_instruction=system,
+            generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+        )
+        prompt = (
+            f"Topic: {topic}\n\n"
+            f"Original (flawed) answer:\n{original_answer}\n\n"
+            f"Interviewer challenge:\n{pushback_challenge}\n\n"
+            f"Candidate's follow-up answer:\n{recovery_answer}"
+        )
         response = await model.generate_content_async(prompt)
         return RecoveryEvaluation.model_validate(json.loads(response.text)).model_dump()
     except google.api_core.exceptions.ResourceExhausted as e:
         logger.error("Gemini quota exhausted in evaluate_recovery: %s", e)
         raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
-    except google.api_core.exceptions.GoogleAPIError as e:
+    except (google.api_core.exceptions.GoogleAPIError, Exception) as e:
+        if isinstance(e, GeminiAPIError):
+            raise e
         logger.error("Gemini API error in evaluate_recovery: %s", e)
         raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
@@ -325,7 +353,11 @@ async def analyze_job_fit(
     job_description: str, resume_claims: list[dict[str, Any]]
 ) -> dict[str, Any]:
     """Analyze candidate's job fit. Returns dict with required_skills, readiness_score, skill_gaps."""
-    system = """Analyze candidate fitness for the role using their resume claims.
+    try:
+        if not settings.gemini_api_key:
+            raise GeminiAPIError("Gemini API key not configured.", status_code=503)
+
+        system = """Analyze candidate fitness for the role using their resume claims.
 
 Return ONLY valid JSON:
 {
@@ -346,26 +378,31 @@ gap_type definitions:
 - Weak: Some evidence but insufficient depth.
 - Missing: Not mentioned at all."""
 
-    model = genai.GenerativeModel(
-        model_name=MODEL,
-        system_instruction=system,
-        generation_config=genai.GenerationConfig(response_mime_type="application/json"),
-    )
-    prompt = f"Job Description:\n{job_description}\n\nResume Claims:\n{json.dumps(resume_claims, indent=2)}"
-    try:
+        model = genai.GenerativeModel(
+            model_name=MODEL,
+            system_instruction=system,
+            generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+        )
+        prompt = f"Job Description:\n{job_description}\n\nResume Claims:\n{json.dumps(resume_claims, indent=2)}"
         response = await model.generate_content_async(prompt)
         return json.loads(response.text)
     except google.api_core.exceptions.ResourceExhausted as e:
         logger.error("Gemini quota exhausted in analyze_job_fit: %s", e)
         raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
-    except google.api_core.exceptions.GoogleAPIError as e:
+    except (google.api_core.exceptions.GoogleAPIError, Exception) as e:
+        if isinstance(e, GeminiAPIError):
+            raise e
         logger.error("Gemini API error in analyze_job_fit: %s", e)
         raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
 
 async def evaluate_answer(claim: str, question: str, answer: str) -> dict[str, Any]:
     """Evaluate a single answer against a resume claim. Returns structured evaluation."""
-    system = """Evaluate the candidate's answer against the specific resume claim being tested.
+    try:
+        if not settings.gemini_api_key:
+            raise GeminiAPIError("Gemini API key not configured.", status_code=503)
+
+        system = """Evaluate the candidate's answer against the specific resume claim being tested.
 
 Return ONLY valid JSON:
 {
@@ -378,26 +415,31 @@ Return ONLY valid JSON:
   "next_question_strategy": "..."
 }"""
 
-    model = genai.GenerativeModel(
-        model_name=MODEL,
-        system_instruction=system,
-        generation_config=genai.GenerationConfig(response_mime_type="application/json"),
-    )
-    prompt = f"Resume Claim: {claim}\nQuestion Asked: {question}\nCandidate Answer: {answer}"
-    try:
+        model = genai.GenerativeModel(
+            model_name=MODEL,
+            system_instruction=system,
+            generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+        )
+        prompt = f"Resume Claim: {claim}\nQuestion Asked: {question}\nCandidate Answer: {answer}"
         response = await model.generate_content_async(prompt)
         return json.loads(response.text)
     except google.api_core.exceptions.ResourceExhausted as e:
         logger.error("Gemini quota exhausted in evaluate_answer: %s", e)
         raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
-    except google.api_core.exceptions.GoogleAPIError as e:
+    except (google.api_core.exceptions.GoogleAPIError, Exception) as e:
+        if isinstance(e, GeminiAPIError):
+            raise e
         logger.error("Gemini API error in evaluate_answer: %s", e)
         raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
 
 
 async def evaluate_interview(transcript: str, session_id: str) -> dict[str, Any]:
     """Generate a full STAR scorecard for the entire interview transcript."""
-    system = """You are a senior hiring manager. Evaluate the interview transcript using the STAR framework.
+    try:
+        if not settings.gemini_api_key:
+            raise GeminiAPIError("Gemini API key not configured.", status_code=503)
+
+        system = """You are a senior hiring manager. Evaluate the interview transcript using the STAR framework.
 
 Return ONLY valid JSON:
 {
@@ -415,19 +457,22 @@ Return ONLY valid JSON:
   "raw_markdown": "Full markdown scorecard with sections for each STAR dimension."
 }"""
 
-    model = genai.GenerativeModel(
-        model_name=MODEL,
-        system_instruction=system,
-        generation_config=genai.GenerationConfig(response_mime_type="application/json"),
-    )
-    response = await model.generate_content_async(f"Full Interview Transcript:\n\n{transcript}")
-    try:
+        model = genai.GenerativeModel(
+            model_name=MODEL,
+            system_instruction=system,
+            generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+        )
+        response = await model.generate_content_async(f"Full Interview Transcript:\n\n{transcript}")
         data = json.loads(response.text)
         data["session_id"] = session_id
         return data
     except google.api_core.exceptions.ResourceExhausted as e:
         logger.error("Gemini quota exhausted in evaluate_interview: %s", e)
         raise GeminiAPIError("AI service quota exceeded. Please try again later.", status_code=429) from e
-    except google.api_core.exceptions.GoogleAPIError as e:
+    except (google.api_core.exceptions.GoogleAPIError, Exception) as e:
+        if isinstance(e, GeminiAPIError):
+            raise e
         logger.error("Gemini API error in evaluate_interview: %s", e)
         raise GeminiAPIError("AI service temporarily unavailable.", status_code=503) from e
+
+

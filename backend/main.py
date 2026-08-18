@@ -7,13 +7,15 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Annotated
 
-from fastapi import FastAPI, WebSocket, Depends
+from fastapi import FastAPI, WebSocket, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import AsyncSessionFactory, engine, Base
 from routers import interview, analysis, sessions, code
+from services.gemini import GeminiAPIError
 from websocket.chat import interview_ws_handler
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +39,13 @@ app = FastAPI(
     description="Mock Interview Platform — Event-Sourced Architecture",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(GeminiAPIError)
+async def gemini_api_error_handler(request: Request, exc: GeminiAPIError) -> JSONResponse:
+    logger.warning("GeminiAPIError handled: %s (status code %d)", exc, exc.status_code)
+    return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
+
 
 # ---------------------------------------------------------------------------
 # CORS

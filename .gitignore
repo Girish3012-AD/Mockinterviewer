@@ -1,8 +1,30 @@
+# Node.js
 node_modules/
+.next/
 build/
 dist/
 coverage/
+
+# Python & Virtual Environments
+.venv/
+backend/.venv/
+venv/
+ENV/
+__pycache__/
+*.pyc
+*.pyo
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment Variables
+.env
+.env.local
+.env.*
+!.env.example
+
+# OS & Logs
 .DS_Store
 *.log
-.env*
-!.env.example
